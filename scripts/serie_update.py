@@ -656,31 +656,29 @@ class Stm32SerieUpdate:
         # Merge & commit
         # to clean the .rej files, uncomment line: reject()
         # reject()
+        short_name_upr = self.stm32_serie.lower().removeprefix("stm32").rstrip("x").upper()
+
         if lib:
             logging.info("%s", "commit BLE library update")
-            commit_msg = "lib/stm32: "
+            scope = "lib/stm32"
+            message_body = (
+                f"Update support library for {self.stm32_serie.upper()} series\n"
+                f"from version {self.current_version} to version {self.version_update}.\n"
+            )
         else:
             logging.info("%s", "commit HAL/LL Cube update ")
-            commit_msg = "stm32cube: "
+            scope = "stm32cube"
+            message_body = (
+                f"Update the STM32Cube{short_name_upr} package from version {self.current_version} to {self.version_update}.\n"
+            )
+
 
         commit_file_path = self.zephyr_module_serie_path / "commit.msg"
         with open(commit_file_path, "w") as commit:
-            commit.write(
-                commit_msg
-                + "update "
-                + self.stm32_serie
-                + " to cube version "
-                + self.version_update.upper()
-                + "\n"
-            )
-
+            commit.write(f"{scope}: {short_name_upr.lower()}: update to Cube version {self.version_update}\n")
             commit.write("\n")
-            commit.write(
-                "Update Cube version for " + self.stm32_seriexx_upper + " series" + "\n"
-            )
-            commit.write("on https://github.com/STMicroelectronics" + "\n")
-            commit.write(f"from version {self.current_version}\n")
-            commit.write(f"to version {self.version_update}\n")
+            commit.write(message_body)
+            commit.write("(Package source: https://github.com/STMicroelectronics/STM32Cube" + short_name_upr + ")\n")
         self.os_cmd(
             ("git", "commit", "-as", "-F", commit_file_path),
             cwd=self.zephyr_module_serie_path,

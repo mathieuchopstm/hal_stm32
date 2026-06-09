@@ -13,6 +13,8 @@ basic usage for all serie update at once:
 """
 
 import os
+import re
+import requests
 import sys
 import subprocess
 import argparse
@@ -57,6 +59,11 @@ parser.add_argument(
     default=False,
     help="select to which version to update.\n",
 )
+parser.add_argument(
+    "--github-auth-token",
+    type=str,
+    help="GitHub token to access the API",
+)
 args = parser.parse_args()
 
 SCRIPT_DIR = Path(__file__).absolute().parent
@@ -72,8 +79,15 @@ def update_cubes():
     if not module_path.exists():
         raise Exception("Error: cannot find ./zephyr project")
 
-    for stmyyxx in module_path.iterdir():
+    for stmyyxx in sorted(module_path.iterdir()):
         if stmyyxx.is_dir() and "common_ll" not in stmyyxx.name:
+            if stmyyxx.name == 'stm32c5xx':
+                logging.info(
+                    "%s",
+                    f"***************  skipping module {stmyyxx.name} *****************",
+                )
+                continue
+
             logging.info(
                 "%s",
                 f"***************  updating module {stmyyxx.name} *****************",
@@ -84,6 +98,59 @@ def update_cubes():
                 serie_name = stmyyxx.name[:-1]
             else:
                 serie_name = stmyyxx.name[:-2]
+
+            # Check if series needs an update using GitHub API
+            if args.github_auth_token is not None:
+                with open(stmyyxx / "README") as f:
+                    pattern = re.compile(r"^\s*version v?(\d+\.\d+\.\d+).*$")
+                    current_version = None
+                    for line in f:
+                        if (match := pattern.match(line)) is not None:
+                            current_version = match.group(1)
+                            break
+
+                if current_version is None:
+                    logging.warning(
+                        f"Could not find current version for {serie_name} in README"
+                    )
+                else:
+                    s_maj, s_min, s_patch = current_version.split(".")
+                    maj, min, patch = int(s_maj), int(s_min), int(s_patch)
+
+                    # Obtain latest tags using GitHub API
+                    series_name = stmyyxx.name.rstrip("x").removeprefix("stm32").upper()
+                    repo_name = f"STM32Cube{series_name}"
+                    response = requests.get(
+                        f"https://api.github.com/repos/STMicroelectronics/{repo_name}/tags",
+                        params={"per_page": 1, "sort": "created", "direction": "desc"},
+                        headers={
+                            "Accept": "application/vnd.github+json",
+                            "Authorization": f"Bearer {args.github_auth_token}",
+                            "User-Agent": "curl/7.81.0",
+                            "X-GitHub-Api-Version": "2026-03-10",
+                        },
+                    )
+
+                    if response.status_code != 200:
+                        logging.warning(
+                            f"Failed to fetch tags for {repo_name} from GitHub API: {response.status_code}"
+                        )
+                    else:
+                        latest_tag = response.json()[0]["name"]
+                        if latest_tag.startswith("v"):
+                            latest_tag = latest_tag[1:]
+                        l_maj, l_min, l_patch = latest_tag.split(".")
+                        l_maj, l_min, l_patch = int(l_maj), int(l_min), int(l_patch)
+
+                        if (l_maj, l_min, l_patch) > (maj, min, patch):
+                            logging.info(
+                                f"New version available for {serie_name}: {latest_tag} (current: {current_version})"
+                            )
+                        else:
+                            logging.info(
+                                f"{serie_name} is up to date (version {current_version}, latest available: {latest_tag})"
+                            )
+                            continue
 
             # Force the commit for each serie
             update_serie = serie_update.Stm32SerieUpdate(
